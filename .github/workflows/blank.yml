@@ -1,109 +1,80 @@
-name: Windows Remote Test
+name: Windows Gaming PC
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows:
+  windows-pc:
     runs-on: windows-latest
+    timeout-minutes: 360
 
     steps:
-
-      - name: Informações do sistema
-        shell: pwsh
+      - name: Preparar Windows
+        shell: powershell
         run: |
-          Write-Host "=== SISTEMA ==="
-          Get-ComputerInfo |
-            Select-Object WindowsProductName, WindowsVersion, OsArchitecture
+          Write-Host "=== PC WINDOWS INICIADO ==="
 
-          Write-Host "`n=== CPU ==="
+          Write-Host "Sistema:"
+          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion
+
+          Write-Host "CPU:"
           Get-CimInstance Win32_Processor |
             Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
 
-          Write-Host "`n=== RAM ==="
+          Write-Host "RAM:"
           Get-CimInstance Win32_ComputerSystem |
-            Select-Object @{
-              Name = "RAM_GB"
-              Expression = {
-                [math]::Round($_.TotalPhysicalMemory / 1GB, 2)
-              }
-            }
+            Select-Object @{Name="RAM_GB";Expression={
+              [math]::Round($_.TotalPhysicalMemory / 1GB, 2)
+            }}
 
-          Write-Host "`n=== GPU ==="
+          Write-Host "GPU:"
           Get-CimInstance Win32_VideoController |
-            Select-Object Name, DriverVersion
+            Select-Object Name
 
       - name: Instalar Tailscale
-        shell: pwsh
+        shell: powershell
         run: |
-          Write-Host "Instalando Tailscale..."
-
-          winget install `
-            --id Tailscale.Tailscale `
+          winget install Tailscale.Tailscale `
             --exact `
             --accept-package-agreements `
             --accept-source-agreements `
             --silent
 
       - name: Verificar Tailscale
-        shell: pwsh
+        shell: powershell
         run: |
           Start-Sleep -Seconds 10
 
-          $ts = Get-Command tailscale.exe `
+          $tailscale = Get-Command tailscale.exe `
             -ErrorAction SilentlyContinue
 
-          if ($null -eq $ts) {
+          if ($tailscale) {
+            Write-Host "Tailscale instalado."
+            tailscale version
+          }
+          else {
             Write-Error "Tailscale não foi encontrado."
-            exit 1
           }
 
-          tailscale version
-
-      - name: Mostrar rede
-        shell: pwsh
+      - name: Informações da máquina
+        shell: powershell
         run: |
-          Write-Host "=== IPs DA MÁQUINA ==="
-          Get-NetIPAddress |
-            Where-Object {
-              $_.AddressFamily -eq "IPv4"
-            } |
-            Select-Object InterfaceAlias, IPAddress
+          Write-Host "=== INFORMAÇÕES DO RUNNER ==="
 
-          Write-Host "`n=== CONFIGURAÇÃO DE REDE ==="
+          hostname
+
+          Write-Host "Interfaces de rede:"
           ipconfig
 
-      - name: Verificar RDP
-        shell: pwsh
-        run: |
-          Write-Host "=== RDP ==="
+          Write-Host "=== WORKFLOW ATIVO ==="
+          Write-Host "O Windows está sendo executado no GitHub Actions."
 
-          Get-Service TermService |
-            Select-Object Name, Status, StartType
-
-          Get-NetFirewallRule `
-            -DisplayGroup "Remote Desktop" `
-            -ErrorAction SilentlyContinue |
-            Select-Object DisplayName, Enabled, Direction
-
-      - name: Teste de desempenho
-        shell: pwsh
-        run: |
-          Write-Host "=== DESEMPENHO ==="
-
-          Get-Counter `
-            '\Processor(_Total)\% Processor Time' `
-            -SampleInterval 2 `
-            -MaxSamples 3
-
-      - name: Manter sessão ativa
-        shell: pwsh
+      - name: Manter máquina ativa
+        shell: powershell
         run: |
           Write-Host "Runner ativo."
 
-          $minutes = 300
-
-          for ($i = 1; $i -le $minutes; $i++) {
-            Write-Host "Minuto $i de $minutes"
+          for ($i = 1; $i -le 330; $i++) {
+            Write-Host "Tempo restante: $($i) minuto(s)"
             Start-Sleep -Seconds 60
           }
