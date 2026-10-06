@@ -1,0 +1,236 @@
+# ============================================================
+# PC REMOTO GAMING - Windows App + Tailscale
+# Windows 11 Pro
+# ============================================================
+
+# Verificar administrador
+$isAdmin = ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "Execute este script como ADMINISTRADOR." -ForegroundColor Red
+    pause
+    exit
+}
+
+Write-Host "=== CONFIGURANDO PC REMOTO PARA GAMING ===" -ForegroundColor Cyan
+
+# ------------------------------------------------------------
+# 1. Verificar edição do Windows
+# ------------------------------------------------------------
+
+$edition = (Get-ComputerInfo).WindowsProductName
+
+Write-Host "Windows detectado: $edition"
+
+if ($edition -notmatch "Pro|Enterprise|Education") {
+    Write-Warning "O Remote Desktop como HOST normalmente requer Windows Pro ou superior."
+}
+
+# ------------------------------------------------------------
+# 2. Ativar Remote Desktop
+# ------------------------------------------------------------
+
+Write-Host "Ativando Remote Desktop..."
+
+Set-ItemProperty `
+    -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+    -Name "fDenyTSConnections" `
+    -Value 0
+
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+# ------------------------------------------------------------
+# 3. Garantir serviços necessários
+# ------------------------------------------------------------
+
+Write-Host "Configurando serviços..."
+
+Set-Service -Name TermService -StartupType Automatic
+Start-Service -Name TermService
+
+# ------------------------------------------------------------
+# 4. Criar regra de firewall para RDP
+# ------------------------------------------------------------
+
+Write-Host "Configurando Firewall..."
+
+Get-NetFirewallRule -DisplayGroup "Remote Desktop" |
+    Enable-NetFirewallRule
+
+# ------------------------------------------------------------
+# 5. Plano de energia - Alto desempenho
+# ------------------------------------------------------------
+
+Write-Host "Configurando plano de energia..."
+
+powercfg /setactive SCHEME_MIN
+
+# Evitar suspensão durante uso conectado
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+
+# ------------------------------------------------------------
+# 6. Desativar Game DVR / gravação em segundo plano
+# ------------------------------------------------------------
+
+Write-Host "Desativando gravação em segundo plano..."
+
+New-Item `
+    -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR" `
+    -Force | Out-Null
+
+Set-ItemProperty `
+    -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR" `
+    -Name "AppCaptureEnabled" `
+    -Type DWord `
+    -Value 0
+
+New-Item `
+    -Path "HKCU:\System\GameConfigStore" `
+    -Force | Out-Null
+
+Set-ItemProperty `
+    -Path "HKCU:\System\GameConfigStore" `
+    -Name "GameDVR_Enabled" `
+    -Type DWord `
+    -Value 0
+
+# ------------------------------------------------------------
+# 7. Prioridade para jogos
+# ------------------------------------------------------------
+
+Write-Host "Ativando otimizações de jogos..."
+
+New-Item `
+    -Path "HKCU:\Software\Microsoft\GameBar" `
+    -Force | Out-Null
+
+Set-ItemProperty `
+    -Path "HKCU:\Software\Microsoft\GameBar" `
+    -Name "AllowAutoGameMode" `
+    -Type DWord `
+    -Value 1
+
+Set-ItemProperty `
+    -Path "HKCU:\Software\Microsoft\GameBar" `
+    -Name "AutoGameModeEnabled" `
+    -Type DWord `
+    -Value 1
+
+# ------------------------------------------------------------
+# 8. Configuração TCP
+# ------------------------------------------------------------
+
+Write-Host "Otimizando configurações de rede..."
+
+netsh int tcp set global autotuninglevel=normal
+netsh int tcp set global rss=enabled
+
+# ------------------------------------------------------------
+# 9. Instalar Tailscale via winget
+# ------------------------------------------------------------
+
+Write-Host "Verificando Tailscale..."
+
+$tailscale = Get-Command tailscale.exe -ErrorAction SilentlyContinue
+
+if (-not $tailscale) {
+
+    Write-Host "Tailscale não encontrado."
+
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+
+    if ($winget) {
+        Write-Host "Instalando Tailscale..."
+        winget install --id Tailscale.Tailscale `
+            --exact `
+            --accept-package-agreements `
+            --accept-source-agreements
+    }
+    else {
+        Write-Warning "winget não está disponível. Instale o Tailscale manualmente."
+    }
+}
+else {
+    Write-Host "Tailscale já está instalado."
+}
+
+# ------------------------------------------------------------
+# 10. Verificar IP Tailscale
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== STATUS DO TAILSCALE ===" -ForegroundColor Cyan
+
+if (Get-Command tailscale.exe -ErrorAction SilentlyContinue) {
+
+    tailscale status
+
+    Write-Host ""
+    Write-Host "IP Tailscale deste PC:"
+    tailscale ip -4
+}
+
+# ------------------------------------------------------------
+# 11. Informações do sistema
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== HARDWARE DETECTADO ===" -ForegroundColor Cyan
+
+Get-CimInstance Win32_Processor |
+    Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
+
+Get-CimInstance Win32_PhysicalMemory |
+    Measure-Object -Property Capacity -Sum |
+    ForEach-Object {
+        Write-Host ("RAM: {0:N2} GB" -f ($_.Sum / 1GB))
+    }
+
+Get-CimInstance Win32_VideoController |
+    Select-Object Name, DriverVersion
+
+# ------------------------------------------------------------
+# 12. Testar porta RDP
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== TESTE RDP ===" -ForegroundColor Cyan
+
+$rdp = Get-NetTCPConnection `
+    -LocalPort 3389 `
+    -State Listen `
+    -ErrorAction SilentlyContinue
+
+if ($rdp) {
+    Write-Host "RDP está escutando na porta 3389." -ForegroundColor Green
+}
+else {
+    Write-Warning "A porta RDP não está escutando."
+}
+
+# ------------------------------------------------------------
+# FINAL
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host " CONFIGURAÇÃO CONCLUÍDA" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "Próximos passos:"
+Write-Host "1. Faça login no Tailscale neste PC."
+Write-Host "2. Faça login no Tailscale no Android."
+Write-Host "3. Pegue o IP 100.x.x.x deste PC."
+Write-Host "4. Abra o Windows App no Android."
+Write-Host "5. Adicione uma conexão Remote Desktop."
+Write-Host "6. Use o IP Tailscale como endereço do PC."
+
+Write-Host ""
+Write-Host "Reinicie o PC para aplicar todas as configurações."
+
+pause
